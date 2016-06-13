@@ -1,0 +1,23 @@
+global
+  maxconn 4096
+
+defaults
+  log global
+  timeout connect 300000
+  timeout client 300000
+  timeout server 300000
+  maxconn 2000
+
+{{ $ips := .IPs }}
+{{ range $name, $service := .RouteTable -}} {{ if hasIP $ips $service.ServiceInfo.ClusterIP }}
+frontend {{ $name }}
+    bind {{ $service.ServiceInfo.ClusterIP }}:{{ $service.ServiceInfo.Port }}
+    mode {{ $service.ServiceInfo.Protocol }}
+    default_backend {{ $name }}_backend
+
+backend {{ $name }}_backend
+    {{ range $index, $endpoints := $service.Endpoints }} 
+    server server{{ $index }} {{ $endpoints.IP }}:{{ $endpoints.Port }}
+    {{ end -}}
+{{ end }}
+{{ end -}}

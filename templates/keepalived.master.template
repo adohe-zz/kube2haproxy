@@ -1,0 +1,36 @@
+! Configuration File for keepalived
+
+global_defs {
+    router_id haproxy-10-0-0.2               
+}
+
+vrrp_script chk_haproxy {
+    script "/etc/keepalived/check_haproxy.sh"    
+    interval 4                                   
+}
+
+vrrp_instance kube-haproxy {
+    state BACKUP            
+    interface eth0    
+    virtual_router_id 89     
+    priority 101            
+    nopreempt               
+    advert_int 1            
+    authentication {        
+        auth_type PASS
+        auth_pass PaaS-HAproxy
+    }
+
+    track_script {          
+        chk_haproxy
+    }
+
+    virtual_ipaddress {     
+    }
+
+    virtual_ipaddress_excluded {  
+        {{ range $ip, $value := . -}}
+        {{ $ip }} dev eth0 
+        {{ end -}}
+    }
+}
