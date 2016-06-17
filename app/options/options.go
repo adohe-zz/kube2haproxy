@@ -33,11 +33,11 @@ func NewProxyServerConfig() *ProxyServerConfig {
 		EnableProfiling: false,
 		KeepalivedConfig: utilkeepalived.KeepalivedConfig{
 			ConfigPath:     "/etc/keepalived/keepalived.conf",
-			ReloadInterval: 2 * time.Second,
+			ReloadInterval: time.Duration(2 * time.Second),
 		},
 		HaproxyConfig: utilhaproxy.HaproxyConfig{
 			ConfigPath:     "/etc/haproxy/haproxy.cfg",
-			ReloadInterval: 5 * time.Second,
+			ReloadInterval: time.Duration(5 * time.Second),
 		},
 	}
 }

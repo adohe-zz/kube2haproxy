@@ -3,7 +3,6 @@ package proxy
 import (
 	"fmt"
 
-	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/types"
 )
 
@@ -36,7 +35,7 @@ func (spn ServicePortName) String() string {
 type Service struct {
 	ClusterIP string
 	Port      int
-	Protocol  api.Protocol
+	Protocol  string
 }
 
 // Endpoint is an internal representation of k8s Endpoint.

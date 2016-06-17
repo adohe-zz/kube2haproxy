@@ -2,6 +2,7 @@ package template
 
 import (
 	"bytes"
+	"strings"
 	"text/template"
 
 	"github.com/AdoHe/kube2haproxy/proxy"
@@ -33,7 +34,8 @@ func RenderTemplate(templateName, templateContent string, data interface{}) ([]b
 // Returns string content of a rendered template (with template functions)
 func RenderTemplateWithFuncs(templateName, templateContent string, data interface{}) ([]byte, error) {
 	funcMap := template.FuncMap{
-		"hasIP": hasIP,
+		"hasIP":   hasIP,
+		"ToLower": strings.ToLower,
 	}
 
 	tpl := template.Must(template.New(templateName).Funcs(funcMap).Parse(templateContent))

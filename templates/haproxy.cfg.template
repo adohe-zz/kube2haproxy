@@ -12,7 +12,7 @@ defaults
 {{ range $name, $service := .RouteTable -}} {{ if hasIP $ips $service.ServiceInfo.ClusterIP }}
 frontend {{ $name }}
     bind {{ $service.ServiceInfo.ClusterIP }}:{{ $service.ServiceInfo.Port }}
-    mode {{ $service.ServiceInfo.Protocol }}
+    mode {{ $service.ServiceInfo.Protocol | ToLower }}
     default_backend {{ $name }}_backend
 
 backend {{ $name }}_backend

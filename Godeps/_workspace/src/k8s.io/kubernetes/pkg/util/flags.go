@@ -48,4 +48,6 @@ func InitFlags() {
 	pflag.CommandLine.SetNormalizeFunc(WordSepNormalizeFunc)
 	pflag.CommandLine.AddGoFlagSet(goflag.CommandLine)
 	pflag.Parse()
+
+	goflag.CommandLine.Parse([]string{})
 }

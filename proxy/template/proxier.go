@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/AdoHe/kube2haproxy/proxy"
 	"github.com/AdoHe/kube2haproxy/util/abool"
@@ -61,6 +62,7 @@ type Proxier struct {
 
 func NewProxier(cfg ProxierConfig) (*Proxier, error) {
 	proxier := &Proxier{
+		config:                             cfg,
 		master:                             abool.New(),
 		vipTable:                           make(map[string]bool),
 		routeTable:                         make(map[string]*proxy.ServiceUnit),
@@ -87,29 +89,19 @@ func NewProxier(cfg ProxierConfig) (*Proxier, error) {
 	}
 	proxier.haproxyInstance = haproxy
 
-	numSeconds := int(cfg.KeepalivedConfig.ReloadInterval.Seconds())
-	proxier.enableKeepalivedRateLimiter(numSeconds, proxier.commitAndReloadKeepalived)
-	numSeconds = int(cfg.HaproxyConfig.ReloadInterval.Seconds())
-	proxier.enableHaproxyRateLimiter(numSeconds, proxier.commitAndReloadHaproxy)
+	proxier.enableKeepalivedRateLimiter(cfg.KeepalivedConfig.ReloadInterval, proxier.commitAndReloadKeepalived)
+	proxier.enableHaproxyRateLimiter(cfg.HaproxyConfig.ReloadInterval, proxier.commitAndReloadHaproxy)
 
 	return proxier, nil
 }
 
-func (proxier *Proxier) enableKeepalivedRateLimiter(interval int, handlerFunc ratelimiter.HandlerFunc) {
-	keyFunc := func(_ interface{}) (string, error) {
-		return "proxier_keepalived", nil
-	}
-
-	proxier.rateLimitedCommitFuncForKeepalived = ratelimiter.NewRateLimitedFunction(keyFunc, interval, handlerFunc)
+func (proxier *Proxier) enableKeepalivedRateLimiter(interval time.Duration, handlerFunc ratelimiter.HandlerFunc) {
+	proxier.rateLimitedCommitFuncForKeepalived = ratelimiter.NewRateLimitedFunction("proxier_keepalived", interval, handlerFunc)
 	proxier.rateLimitedCommitFuncForKeepalived.RunUntil(proxier.rateLimitedCommitStopChannel)
 }
 
-func (proxier *Proxier) enableHaproxyRateLimiter(interval int, handlerFunc ratelimiter.HandlerFunc) {
-	keyFunc := func(_ interface{}) (string, error) {
-		return "proxier_haproxy", nil
-	}
-
-	proxier.rateLimitedCommitFuncForHaproxy = ratelimiter.NewRateLimitedFunction(keyFunc, interval, handlerFunc)
+func (proxier *Proxier) enableHaproxyRateLimiter(interval time.Duration, handlerFunc ratelimiter.HandlerFunc) {
+	proxier.rateLimitedCommitFuncForHaproxy = ratelimiter.NewRateLimitedFunction("proxier_haproxy", interval, handlerFunc)
 	proxier.rateLimitedCommitFuncForHaproxy.RunUntil(proxier.rateLimitedCommitStopChannel)
 }
 
@@ -134,6 +126,10 @@ func (proxier *Proxier) handleServiceAdd(service *api.Service) {
 
 	for i := range service.Spec.Ports {
 		servicePort := &service.Spec.Ports[i]
+		if servicePort.Protocol == api.ProtocolUDP {
+			// Skip UDP, HAProxy doesn't support UDP Protocol
+			continue
+		}
 
 		serviceName := proxy.ServicePortName{
 			NamespacedName: svcName,
@@ -142,7 +138,7 @@ func (proxier *Proxier) handleServiceAdd(service *api.Service) {
 		svc := proxy.Service{
 			ClusterIP: service.Spec.ClusterIP,
 			Port:      servicePort.Port,
-			Protocol:  servicePort.Protocol,
+			Protocol:  string(servicePort.Protocol),
 		}
 
 		if oldServiceUnit, ok := proxier.findServiceUnit(serviceName.String()); ok {
@@ -240,7 +236,7 @@ func (proxier *Proxier) handleEndpointsDelete(endpoints *api.Endpoints) {
 
 func (proxier *Proxier) commitKeepalived() {
 	if !proxier.master.IsSet() || proxier.skipCommit {
-		glog.V(4).Infof("Skipping Keepalived commit for state: %s,%s", proxier.master.IsSet(), proxier.skipCommit)
+		glog.V(4).Infof("Skipping Keepalived commit for state: Master(%t),SkipCommit(%t)", proxier.master.IsSet(), proxier.skipCommit)
 	} else {
 		proxier.rateLimitedCommitFuncForKeepalived.Invoke(proxier.rateLimitedCommitFuncForKeepalived)
 	}
@@ -248,7 +244,7 @@ func (proxier *Proxier) commitKeepalived() {
 
 func (proxier *Proxier) commitHaproxy() {
 	if !proxier.master.IsSet() || proxier.skipCommit {
-		glog.V(4).Infof("Skipping HAProxy commit for state: %s,%s", proxier.master.IsSet(), proxier.skipCommit)
+		glog.V(4).Infof("Skipping HAProxy commit for state: Master(%t),SkipCommit(%t)", proxier.master.IsSet(), proxier.skipCommit)
 	} else {
 		proxier.rateLimitedCommitFuncForHaproxy.Invoke(proxier.rateLimitedCommitFuncForHaproxy)
 	}
@@ -346,7 +342,10 @@ func (proxier *Proxier) SetMaster(master bool) {
 		proxier.master.Set()
 		// When we transfered to MASTER
 		// we need to sync configuration manually
+		glog.V(4).Infof("Entering MASTER state, reload manually")
 		proxier.commitAndReloadKeepalived()
+		// Normally this should be long enough for IP binding really happens
+		time.Sleep(1000 * time.Millisecond)
 		proxier.commitAndReloadHaproxy()
 	} else {
 		proxier.master.UnSet()
@@ -357,7 +356,7 @@ func (proxier *Proxier) SetMaster(master bool) {
 // commit/reload should be skipped.
 func (proxier *Proxier) SetSkipCommit(skipCommit bool) {
 	if proxier.skipCommit != skipCommit {
-		glog.V(4).Infof("Updating skipCommit to %s", skipCommit)
+		glog.V(4).Infof("Updating skipCommit to %t", skipCommit)
 		proxier.skipCommit = skipCommit
 	}
 }

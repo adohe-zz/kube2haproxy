@@ -31,3 +31,18 @@ func TestTemplateHasIPFunction(t *testing.T) {
 		t.Fatalf("get unexpected content: %s", content)
 	}
 }
+
+func TestTemplateToLowerFunction(t *testing.T) {
+	templateName := "templateName"
+	templateContent := "{{ $ips := .IPs }}{{ range $name, $service := .RouteTable}}{{ if hasIP $ips $service.ServiceInfo.ClusterIP }}{{ $service.ServiceInfo.Protocol | ToLower }}{{ end }}{{ end }}"
+	params := TemplateData{
+		IPs: map[string]bool{"10.0.0.1": true},
+		RouteTable: map[string]*proxy.ServiceUnit{
+			"TestServiceOne": &proxy.ServiceUnit{ServiceInfo: proxy.Service{ClusterIP: "10.0.0.1", Protocol: "TCP"}},
+		},
+	}
+	content, _ := RenderTemplateWithFuncs(templateName, templateContent, params)
+	if string(content) != "tcp" {
+		t.Fatalf("get unexpected content: %s", content)
+	}
+}

@@ -27,7 +27,7 @@ func (h *handler) counter() int {
 func TestRateLimitedFunction(t *testing.T) {
 	tests := []struct {
 		Name     string
-		Interval int
+		Interval time.Duration
 		Times    int
 	}{
 		{
@@ -37,24 +37,20 @@ func TestRateLimitedFunction(t *testing.T) {
 		},
 		{
 			Name:     "3PO",
-			Interval: 3,
+			Interval: 3 * time.Second,
 			Times:    10,
 		},
 		{
 			Name:     "five-fer",
-			Interval: 5,
+			Interval: 5 * time.Second,
 			Times:    20,
 		},
-	}
-
-	keyFunc := func(_ interface{}) (string, error) {
-		return "ratelimitertest", nil
 	}
 
 	for _, tc := range tests {
 		h := &handler{}
 		quit := make(chan struct{})
-		rlf := NewRateLimitedFunction(keyFunc, tc.Interval, h.handle)
+		rlf := NewRateLimitedFunction("ratelimitertest", tc.Interval, h.handle)
 		rlf.RunUntil(quit)
 
 		for i := 0; i < tc.Times; i++ {
@@ -64,14 +60,14 @@ func TestRateLimitedFunction(t *testing.T) {
 				} else {
 					rlf.Invoke(idx)
 				}
-			}(rlf, i, tc.Interval)
+			}(rlf, i, int(tc.Interval.Seconds()))
 		}
 
 		select {
-		case <-time.After(time.Duration(tc.Interval+2) * time.Second):
+		case <-time.After(time.Duration(tc.Interval.Seconds()+2) * time.Second):
 			close(quit)
 			counter := h.counter()
-			if tc.Interval > 0 && counter >= tc.Times/2 {
+			if tc.Interval.Seconds() > 0 && counter >= tc.Times/2 {
 				t.Errorf("For coalesced calls, expected number of invocations to be atleast half. Expected: < %v  Got: %v",
 					tc.Times/2, counter)
 			}

@@ -1,12 +1,16 @@
 package ratelimiter
 
 import (
+	"time"
+
 	"github.com/AdoHe/kube2haproxy/util/flowcontrol"
 
 	kcache "k8s.io/kubernetes/pkg/client/cache"
 	utilruntime "k8s.io/kubernetes/pkg/util/runtime"
 	utilwait "k8s.io/kubernetes/pkg/util/wait"
 )
+
+const maxBackOffPeriod time.Duration = 30 * time.Second
 
 // HandlerFunc defines function signature for a RateLimitedFunction.
 type HandlerFunc func() error
@@ -19,22 +23,21 @@ type RateLimitedFunction struct {
 	// Internal queue of requests to be processed.
 	queue kcache.Queue
 
-	// Rate limiting configuration.
-	flowcontrol.RateLimiter
+	// Backoff configuration
+	backOffKey string
+	backOff    *flowcontrol.Backoff
 }
 
 // NewRateLimitedFunction creates a new rate limited function.
-func NewRateLimitedFunction(keyFunc kcache.KeyFunc, interval int, handlerFunc HandlerFunc) *RateLimitedFunction {
+func NewRateLimitedFunction(backOffKey string, period time.Duration, handlerFunc HandlerFunc) *RateLimitedFunction {
+	keyFunc := func(_ interface{}) (string, error) {
+		return backOffKey, nil
+	}
 	fifo := kcache.NewFIFO(keyFunc)
 
-	qps := float32(1000.0) // Call rate per second (SLA).
-	if interval > 0 {
-		qps = float32(1.0 / float32(interval))
-	}
+	backOff := flowcontrol.NewBackOff(period, maxBackOffPeriod)
 
-	limiter := flowcontrol.NewTokenBucketRateLimiter(qps, 1)
-
-	return &RateLimitedFunction{handlerFunc, fifo, limiter}
+	return &RateLimitedFunction{handlerFunc, fifo, backOffKey, backOff}
 }
 
 // RunUntil begins processes the resources from queue asynchronously until
@@ -46,10 +49,14 @@ func (rlf *RateLimitedFunction) RunUntil(stopCh <-chan struct{}) {
 // handleOne processes a request in the queue invoking the rate limited
 // function.
 func (rlf *RateLimitedFunction) handleOne(resource interface{}) {
-	rlf.RateLimiter.Accept()
+	if rlf.backOff.IsInBackOffSinceUpdate(rlf.backOffKey, rlf.backOff.Clock.Now()) {
+		rlf.queue.AddIfNotPresent(resource)
+		return
+	}
 	if err := rlf.Handler(); err != nil {
 		utilruntime.HandleError(err)
 	}
+	rlf.backOff.Next(rlf.backOffKey, rlf.backOff.Clock.Now())
 }
 
 // Invoke adds a request if its not already present and waits for the
