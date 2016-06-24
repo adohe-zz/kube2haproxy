@@ -236,7 +236,7 @@ func (proxier *Proxier) handleEndpointsDelete(endpoints *api.Endpoints) {
 
 func (proxier *Proxier) commitKeepalived() {
 	if !proxier.master.IsSet() || proxier.skipCommit {
-		glog.V(4).Infof("Skipping Keepalived commit for state: Master(%t),SkipCommit(%t)", proxier.master.IsSet(), proxier.skipCommit)
+		glog.V(8).Infof("Skipping Keepalived commit for state: Master(%t),SkipCommit(%t)", proxier.master.IsSet(), proxier.skipCommit)
 	} else {
 		proxier.rateLimitedCommitFuncForKeepalived.Invoke(proxier.rateLimitedCommitFuncForKeepalived)
 	}
@@ -244,7 +244,7 @@ func (proxier *Proxier) commitKeepalived() {
 
 func (proxier *Proxier) commitHaproxy() {
 	if !proxier.master.IsSet() || proxier.skipCommit {
-		glog.V(4).Infof("Skipping HAProxy commit for state: Master(%t),SkipCommit(%t)", proxier.master.IsSet(), proxier.skipCommit)
+		glog.V(8).Infof("Skipping HAProxy commit for state: Master(%t),SkipCommit(%t)", proxier.master.IsSet(), proxier.skipCommit)
 	} else {
 		proxier.rateLimitedCommitFuncForHaproxy.Invoke(proxier.rateLimitedCommitFuncForHaproxy)
 	}
