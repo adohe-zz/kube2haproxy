@@ -25,19 +25,19 @@ Compared with kube-proxy(also noted as distributed proxy), kube2haproxy runs loc
 
 ```
 --address string                        The IP address to serve on (set to 0.0.0.0 for all interfaces)
-      --alsologtostderr value                 log to standard error as well as files
-      --device string                         Network device to bind service IP
-      --haproxy-config-file string            Path of config file for haproxy (default "/etc/haproxy/haproxy.cfg")
-      --haproxy-reload-interval duration      Controls how often haproxy reload is invoked (default 5s)
-      --haproxy-reload-script string          Path of haproxy reload script
-      --haproxy-template-file string          Path of haproxy template
-      --keepalived-config-file string         Path of config file for keepalived (default "/etc/keepalived/keepalived.conf")
-      --keepalived-reload-interval duration   Controls how often keepalived reload is invoked (default 2s)
-      --keepalived-reload-script string       Path of keepalived reload script
-      --keepalived-template-file string       Path of keepalived config template
-      --kube-api-burst int                    Burst to use while talking with kubernets apiserver (default 10)
-      --kube-api-qps value                    QPS to use while talking with kubernetes apiserver (default 5)
-      --kubeconfig string                     Path to kubeconfig file with authorization information (the master location is set by the master flag).
+--alsologtostderr value                 log to standard error as well as files
+--device string                         Network device to bind service IP
+--haproxy-config-file string            Path of config file for haproxy (default "/etc/haproxy/haproxy.cfg")
+--haproxy-reload-interval duration      Controls how often haproxy reload is invoked (default 5s)
+--haproxy-reload-script string          Path of haproxy reload script
+--haproxy-template-file string          Path of haproxy template
+--keepalived-config-file string         Path of config file for keepalived (default "/etc/keepalived/keepalived.conf")
+--keepalived-reload-interval duration   Controls how often keepalived reload is invoked (default 2s)
+--keepalived-reload-script string       Path of keepalived reload script
+--keepalived-template-file string       Path of keepalived config template
+--kube-api-burst int                    Burst to use while talking with kubernets apiserver (default 10)
+--kube-api-qps value                    QPS to use while talking with kubernetes apiserver (default 5)
+--kubeconfig string                     Path to kubeconfig file with authorization information (the master location is set by the master flag).
 
 ```
 
