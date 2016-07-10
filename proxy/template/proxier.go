@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -107,7 +108,7 @@ func (proxier *Proxier) enableHaproxyRateLimiter(interval time.Duration, handler
 
 func (proxier *Proxier) handleServiceAdd(service *api.Service) {
 	if !api.IsServiceIPSet(service) {
-		glog.V(3).Infof("Skipping service %s due to ClusterIP = %q", fmt.Sprintf("%s/%s", service.Namespace, service.Name), service.Spec.ClusterIP)
+		glog.V(4).Infof("Skipping service %s due to ClusterIP = %q", fmt.Sprintf("%s/%s", service.Namespace, service.Name), service.Spec.ClusterIP)
 		return
 	}
 
@@ -118,20 +119,21 @@ func (proxier *Proxier) handleServiceAdd(service *api.Service) {
 		Namespace: service.Namespace,
 		Name:      service.Name,
 	}
+	glog.V(4).Infof("handle service %s add event", svcName.String())
 
-	if !proxier.vipTable[service.Spec.ClusterIP] {
-		proxier.vipTable[service.Spec.ClusterIP] = true
-		proxier.commitKeepalived()
-	}
+	// add service cluster IP to vip table
+	proxier.vipTable[service.Spec.ClusterIP] = true
+	proxier.commitKeepalived()
 
 	for i := range service.Spec.Ports {
 		servicePort := &service.Spec.Ports[i]
 		if servicePort.Protocol == api.ProtocolUDP {
-			// Skip UDP, HAProxy doesn't support UDP Protocol
+			// Skip UDP service, HAProxy doesn't support UDP
+			glog.V(4).Infof("Skipping service port %s due to UDP protocol", fmt.Sprintf("%s:%s:%s", service.Namespace, service.Name, servicePort.Name))
 			continue
 		}
 
-		serviceName := proxy.ServicePortName{
+		svcPortName := proxy.ServicePortName{
 			NamespacedName: svcName,
 			Port:           servicePort.Name,
 		}
@@ -141,17 +143,84 @@ func (proxier *Proxier) handleServiceAdd(service *api.Service) {
 			Protocol:  string(servicePort.Protocol),
 		}
 
-		if oldServiceUnit, ok := proxier.findServiceUnit(serviceName.String()); ok {
+		_, exist := proxier.findServiceUnit(svcPortName.String())
+		if exist {
+			glog.V(4).Infof("%s exist already. Override it", svcPortName.String())
+		} else {
+			glog.V(4).Infof("add %s service info", svcPortName.String())
+		}
+		proxier.routeTable[svcPortName.String()] = &proxy.ServiceUnit{
+			Name:        svcPortName.String(),
+			ServiceInfo: svc,
+			Endpoints:   []proxy.Endpoint{},
+		}
+	}
+	proxier.commitHaproxy()
+}
+
+func (proxier *Proxier) handleServiceUpdate(service *api.Service) {
+	if !api.IsServiceIPSet(service) {
+		glog.V(4).Infof("Skipping service %s due to ClusterIP = %q", fmt.Sprintf("%s/%s", service.Namespace, service.Name), service.Spec.ClusterIP)
+		return
+	}
+
+	proxier.lock.Lock()
+	defer proxier.lock.Unlock()
+
+	svcName := types.NamespacedName{
+		Namespace: service.Namespace,
+		Name:      service.Name,
+	}
+	glog.V(4).Infof("handle service %s update event", svcName.String())
+
+	// Normally we should check this to avoid service cluster IP change,
+	// but this is not always right. service update event may comes before
+	// service add event.
+	if !proxier.vipTable[service.Spec.ClusterIP] {
+		proxier.vipTable[service.Spec.ClusterIP] = true
+		proxier.commitKeepalived()
+	}
+
+	oldSvcPortsList := proxier.getServicePorts(fmt.Sprintf("%s:%s", svcName.Namespace, svcName.Name))
+	newSvcPortsList := []string{}
+	for i := range service.Spec.Ports {
+		servicePort := &service.Spec.Ports[i]
+		if servicePort.Protocol == api.ProtocolUDP {
+			// Skip UDP service, HAProxy doesn't support UDP
+			glog.V(4).Infof("Skipping service port %s due to UDP protocol", fmt.Sprintf("%s:%s:%s", service.Namespace, service.Name, servicePort.Name))
+			continue
+		}
+
+		svcPortName := proxy.ServicePortName{
+			NamespacedName: svcName,
+			Port:           servicePort.Name,
+		}
+		svc := proxy.Service{
+			ClusterIP: service.Spec.ClusterIP,
+			Port:      servicePort.Port,
+			Protocol:  string(servicePort.Protocol),
+		}
+
+		if oldServiceUnit, exist := proxier.findServiceUnit(svcPortName.String()); exist {
 			if !reflect.DeepEqual(oldServiceUnit.ServiceInfo, svc) {
+				glog.V(4).Infof("service info %s changed, needs update %#v", svcPortName.String(), svc)
 				oldServiceUnit.ServiceInfo = svc
 			}
 		} else {
-			proxier.routeTable[serviceName.String()] = &proxy.ServiceUnit{
-				Name:        serviceName.String(),
+			glog.V(4).Infof("service info %s not exist, needs add %#v", svcPortName.String(), svc)
+			proxier.routeTable[svcPortName.String()] = &proxy.ServiceUnit{
+				Name:        svcPortName.String(),
 				ServiceInfo: svc,
 				Endpoints:   []proxy.Endpoint{},
 			}
 		}
+		newSvcPortsList = append(newSvcPortsList, svcPortName.String())
+	}
+
+	// Calculate service port should be deleted
+	diffList := diff(oldSvcPortsList, newSvcPortsList)
+	for _, diff := range diffList {
+		delete(proxier.routeTable, diff)
 	}
 	proxier.commitHaproxy()
 }
@@ -160,13 +229,16 @@ func (proxier *Proxier) handleServiceDelete(service *api.Service) {
 	proxier.lock.Lock()
 	defer proxier.lock.Unlock()
 
-	delete(proxier.vipTable, service.Spec.ClusterIP)
-	proxier.commitKeepalived()
-
 	svcName := types.NamespacedName{
 		Namespace: service.Namespace,
 		Name:      service.Name,
 	}
+
+	glog.V(4).Infof("handle service %s delete event", svcName.String())
+
+	delete(proxier.vipTable, service.Spec.ClusterIP)
+	proxier.commitKeepalived()
+
 	for i := range service.Spec.Ports {
 		servicePort := &service.Spec.Ports[i]
 		serviceName := proxy.ServicePortName{
@@ -183,11 +255,26 @@ func (proxier *Proxier) handleEndpointsAdd(endpoints *api.Endpoints) {
 	proxier.lock.Lock()
 	defer proxier.lock.Unlock()
 
+	epName := types.NamespacedName{
+		Namespace: endpoints.Namespace,
+		Name:      endpoints.Name,
+	}
+	glog.V(4).Infof("handle endpoints %s add event", epName.String())
+
+	if len(endpoints.Subsets) == 0 {
+		// Skip endpoints as endpoints has no subsets
+		glog.V(4).Infof("Skipping endpoints %s due to empty subsets", epName.String())
+		return
+	}
+
 	// We need to build a map of portname -> all ip:ports for that
 	// portname. Explode Endpoints.Subsets[*] into this structure.
 	portsToEndpoints := map[string][]proxy.Endpoint{}
 	for i := range endpoints.Subsets {
 		ss := &endpoints.Subsets[i]
+		if len(ss.NotReadyAddresses) != 0 {
+			glog.V(4).Infof("endpoints %s has not ready address, please check this", epName.String())
+		}
 		for i := range ss.Ports {
 			port := &ss.Ports[i]
 			for i := range ss.Addresses {
@@ -198,16 +285,75 @@ func (proxier *Proxier) handleEndpointsAdd(endpoints *api.Endpoints) {
 	}
 
 	for portname := range portsToEndpoints {
-		svcPort := proxy.ServicePortName{NamespacedName: types.NamespacedName{Namespace: endpoints.Namespace, Name: endpoints.Name}, Port: portname}
+		svcPortName := proxy.ServicePortName{NamespacedName: epName, Port: portname}
 		newEndpoints := portsToEndpoints[portname]
-		if oldServiceUnit, ok := proxier.findServiceUnit(svcPort.String()); ok {
+		if oldServiceUnit, exist := proxier.findServiceUnit(svcPortName.String()); exist {
 			if !reflect.DeepEqual(oldServiceUnit.Endpoints, newEndpoints) {
+				glog.V(4).Infof("endpoints of %s changed, needs update %v", svcPortName.String(), newEndpoints)
 				oldServiceUnit.Endpoints = newEndpoints
 			}
 		} else {
-			newServiceUnit := proxier.createServiceUnit(svcPort.String())
+			glog.V(4).Infof("endpoints of %s not exist, needs add %v", svcPortName.String(), newEndpoints)
+			newServiceUnit := proxier.createServiceUnit(svcPortName.String())
 			newServiceUnit.Endpoints = append(newServiceUnit.Endpoints, newEndpoints...)
 		}
+	}
+	proxier.commitHaproxy()
+}
+
+func (proxier *Proxier) handleEndpointsUpdate(endpoints *api.Endpoints) {
+	proxier.lock.Lock()
+	defer proxier.lock.Unlock()
+
+	epName := types.NamespacedName{
+		Namespace: endpoints.Namespace,
+		Name:      endpoints.Name,
+	}
+	glog.V(4).Infof("handle endpoints %s update event", epName.String())
+
+	if len(endpoints.Subsets) == 0 {
+		glog.V(4).Infof("endpoints %s has empty subsets, this may happen when deploy", epName.String())
+	}
+
+	oldSvcPortsList := proxier.getServicePorts(fmt.Sprintf("%s:%s", epName.Namespace, epName.Name))
+	newSvcPortsList := []string{}
+
+	// We need to build a map of portname -> all ip:ports for that
+	// portname. Explode Endpoints.Subsets[*] into this structure.
+	portsToEndpoints := map[string][]proxy.Endpoint{}
+	for i := range endpoints.Subsets {
+		ss := &endpoints.Subsets[i]
+		if len(ss.NotReadyAddresses) != 0 {
+			glog.V(4).Infof("endpoints %s has not ready address, please check this", epName.String())
+		}
+		for i := range ss.Ports {
+			port := &ss.Ports[i]
+			for i := range ss.Addresses {
+				addr := &ss.Addresses[i]
+				portsToEndpoints[port.Name] = append(portsToEndpoints[port.Name], proxy.Endpoint{addr.IP, port.Port})
+			}
+		}
+	}
+
+	for portname := range portsToEndpoints {
+		svcPortName := proxy.ServicePortName{NamespacedName: epName, Port: portname}
+		newEndpoints := portsToEndpoints[portname]
+		if oldServiceUnit, exist := proxier.findServiceUnit(svcPortName.String()); exist {
+			if !reflect.DeepEqual(oldServiceUnit.Endpoints, newEndpoints) {
+				glog.V(4).Infof("endpoints of %s changed, needs update %v", svcPortName.String(), newEndpoints)
+				oldServiceUnit.Endpoints = newEndpoints
+			}
+		} else {
+			glog.V(4).Infof("endpoints of %s not exist, needs add %v", svcPortName.String(), newEndpoints)
+			newServiceUnit := proxier.createServiceUnit(svcPortName.String())
+			newServiceUnit.Endpoints = append(newServiceUnit.Endpoints, newEndpoints...)
+		}
+		newSvcPortsList = append(newSvcPortsList, svcPortName.String())
+	}
+
+	diffList := diff(oldSvcPortsList, newSvcPortsList)
+	for _, diff := range diffList {
+		proxier.routeTable[diff].Endpoints = []proxy.Endpoint{}
 	}
 	proxier.commitHaproxy()
 }
@@ -215,6 +361,12 @@ func (proxier *Proxier) handleEndpointsAdd(endpoints *api.Endpoints) {
 func (proxier *Proxier) handleEndpointsDelete(endpoints *api.Endpoints) {
 	proxier.lock.Lock()
 	defer proxier.lock.Unlock()
+
+	epName := types.NamespacedName{
+		Namespace: endpoints.Namespace,
+		Name:      endpoints.Name,
+	}
+	glog.V(4).Infof("handle endpoints %s delete event", epName.String())
 
 	portsNameMap := map[string]bool{}
 	for i := range endpoints.Subsets {
@@ -238,6 +390,7 @@ func (proxier *Proxier) commitKeepalived() {
 	if !proxier.master.IsSet() || proxier.skipCommit {
 		glog.V(8).Infof("Skipping Keepalived commit for state: Master(%t),SkipCommit(%t)", proxier.master.IsSet(), proxier.skipCommit)
 	} else {
+		glog.V(4).Infof("commit keepalived")
 		proxier.rateLimitedCommitFuncForKeepalived.Invoke(proxier.rateLimitedCommitFuncForKeepalived)
 	}
 }
@@ -246,6 +399,7 @@ func (proxier *Proxier) commitHaproxy() {
 	if !proxier.master.IsSet() || proxier.skipCommit {
 		glog.V(8).Infof("Skipping HAProxy commit for state: Master(%t),SkipCommit(%t)", proxier.master.IsSet(), proxier.skipCommit)
 	} else {
+		glog.V(4).Infof("commit haproxy")
 		proxier.rateLimitedCommitFuncForHaproxy.Invoke(proxier.rateLimitedCommitFuncForHaproxy)
 	}
 }
@@ -307,6 +461,18 @@ func (proxier *Proxier) createServiceUnit(name string) *proxy.ServiceUnit {
 	return service
 }
 
+// getServicePorts returns a service ports name list.
+func (proxier *Proxier) getServicePorts(svcName string) []string {
+	names := []string{}
+	for name, _ := range proxier.routeTable {
+		svcNameExist := name[:strings.LastIndex(name, ":")]
+		if svcNameExist == svcName {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // findServiceUnit finds the service unit with given name.
 func (proxier *Proxier) findServiceUnit(name string) (*proxy.ServiceUnit, bool) {
 	v, ok := proxier.routeTable[name]
@@ -315,8 +481,10 @@ func (proxier *Proxier) findServiceUnit(name string) (*proxy.ServiceUnit, bool) 
 
 func (proxier *Proxier) HandleService(eventType watch.EventType, service *api.Service) error {
 	switch eventType {
-	case watch.Added, watch.Modified:
+	case watch.Added:
 		proxier.handleServiceAdd(service)
+	case watch.Modified:
+		proxier.handleServiceUpdate(service)
 	case watch.Deleted:
 		proxier.handleServiceDelete(service)
 	}
@@ -326,8 +494,10 @@ func (proxier *Proxier) HandleService(eventType watch.EventType, service *api.Se
 
 func (proxier *Proxier) HandleEndpoints(eventType watch.EventType, endpoints *api.Endpoints) error {
 	switch eventType {
-	case watch.Added, watch.Modified:
+	case watch.Added:
 		proxier.handleEndpointsAdd(endpoints)
+	case watch.Modified:
+		proxier.handleEndpointsUpdate(endpoints)
 	case watch.Deleted:
 		proxier.handleEndpointsDelete(endpoints)
 	}
@@ -339,14 +509,16 @@ func (proxier *Proxier) HandleEndpoints(eventType watch.EventType, endpoints *ap
 // state or BACKUP state.
 func (proxier *Proxier) SetMaster(master bool) {
 	if master {
-		proxier.master.Set()
 		// When we transfered to MASTER
 		// we need to sync configuration manually
 		glog.V(4).Infof("Entering MASTER state, reload manually")
 		proxier.commitAndReloadKeepalived()
-		// Normally this should be long enough for IP binding really happens
-		time.Sleep(1000 * time.Millisecond)
+		// This should be long enough for virtual IP binding happen
+		time.Sleep(2000 * time.Millisecond)
 		proxier.commitAndReloadHaproxy()
+		// Set Master state TRUE to avoid frequently keepalived reload
+		proxier.master.Set()
+		// When we transfered to MASTER
 	} else {
 		proxier.master.UnSet()
 	}
@@ -359,4 +531,22 @@ func (proxier *Proxier) SetSkipCommit(skipCommit bool) {
 		glog.V(4).Infof("Updating skipCommit to %t", skipCommit)
 		proxier.skipCommit = skipCommit
 	}
+}
+
+// diff will calculate the diff between the old&new list.
+func diff(oldList, newList []string) []string {
+	result := []string{}
+	for _, oldItem := range oldList {
+		found := false
+		for _, newItem := range newList {
+			if oldItem == newItem {
+				found = true
+				break
+			}
+		}
+		if !found {
+			result = append(result, oldItem)
+		}
+	}
+	return result
 }
