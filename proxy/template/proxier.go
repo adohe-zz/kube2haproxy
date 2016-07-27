@@ -122,8 +122,10 @@ func (proxier *Proxier) handleServiceAdd(service *api.Service) {
 	glog.V(4).Infof("handle service %s add event", svcName.String())
 
 	// add service cluster IP to vip table
-	proxier.vipTable[service.Spec.ClusterIP] = true
-	proxier.commitKeepalived()
+	if !proxier.vipTable[service.Spec.ClusterIP] {
+		proxier.vipTable[service.Spec.ClusterIP] = true
+		proxier.commitKeepalived()
+	}
 
 	for i := range service.Spec.Ports {
 		servicePort := &service.Spec.Ports[i]
@@ -143,16 +145,19 @@ func (proxier *Proxier) handleServiceAdd(service *api.Service) {
 			Protocol:  string(servicePort.Protocol),
 		}
 
-		_, exist := proxier.findServiceUnit(svcPortName.String())
+		oldSvcUnit, exist := proxier.findServiceUnit(svcPortName.String())
 		if exist {
-			glog.V(4).Infof("%s exist already. Override it", svcPortName.String())
+			if !reflect.DeepEqual(oldSvcUnit.ServiceInfo, svc) {
+				glog.V(4).Infof("%s changed. Update it", svcPortName.String())
+				oldSvcUnit.ServiceInfo = svc
+			}
 		} else {
 			glog.V(4).Infof("add %s service info", svcPortName.String())
-		}
-		proxier.routeTable[svcPortName.String()] = &proxy.ServiceUnit{
-			Name:        svcPortName.String(),
-			ServiceInfo: svc,
-			Endpoints:   []proxy.Endpoint{},
+			proxier.routeTable[svcPortName.String()] = &proxy.ServiceUnit{
+				Name:        svcPortName.String(),
+				ServiceInfo: svc,
+				Endpoints:   []proxy.Endpoint{},
+			}
 		}
 	}
 	proxier.commitHaproxy()
@@ -518,7 +523,6 @@ func (proxier *Proxier) SetMaster(master bool) {
 		proxier.commitAndReloadHaproxy()
 		// Set Master state TRUE to avoid frequently keepalived reload
 		proxier.master.Set()
-		// When we transfered to MASTER
 	} else {
 		proxier.master.UnSet()
 	}
