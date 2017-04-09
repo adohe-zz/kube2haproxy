@@ -3,7 +3,7 @@ package ratelimiter
 import (
 	"time"
 
-	"github.com/AdoHe/kube2haproxy/util/flowcontrol"
+	"github.com/adohe/kube2haproxy/util/flowcontrol"
 
 	kcache "k8s.io/kubernetes/pkg/client/cache"
 	utilruntime "k8s.io/kubernetes/pkg/util/runtime"

@@ -3,7 +3,7 @@ package template
 import (
 	"testing"
 
-	"github.com/AdoHe/kube2haproxy/proxy"
+	"github.com/adohe/kube2haproxy/proxy"
 )
 
 func TestTemplateWriter(t *testing.T) {

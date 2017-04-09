@@ -5,8 +5,8 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/AdoHe/kube2haproxy/app"
-	"github.com/AdoHe/kube2haproxy/app/options"
+	"github.com/adohe/kube2haproxy/app"
+	"github.com/adohe/kube2haproxy/app/options"
 
 	"k8s.io/kubernetes/pkg/util"
 

@@ -1,5 +1,5 @@
 {
-	"ImportPath": "github.com/AdoHe/kube2haproxy",
+	"ImportPath": "github.com/adohe/kube2haproxy",
 	"GoVersion": "go1.6.2",
 	"Deps": [
 		{

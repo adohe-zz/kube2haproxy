@@ -5,7 +5,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/AdoHe/kube2haproxy/proxy"
+	"github.com/adohe/kube2haproxy/proxy"
 )
 
 type TemplateData struct {

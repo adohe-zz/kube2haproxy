@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/AdoHe/kube2haproxy/app/options"
-	"github.com/AdoHe/kube2haproxy/proxy/controller"
-	"github.com/AdoHe/kube2haproxy/proxy/template"
+	"github.com/adohe/kube2haproxy/app/options"
+	"github.com/adohe/kube2haproxy/proxy/controller"
+	"github.com/adohe/kube2haproxy/proxy/template"
 
 	kubeclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/client/unversioned/clientcmd"

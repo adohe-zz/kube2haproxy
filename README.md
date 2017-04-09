@@ -18,7 +18,7 @@ Compared with kube-proxy(also noted as distributed proxy), kube2haproxy runs loc
 
 ## Build
 
-* Step 1: Git clone the kube2haproxy repo: `git clone https://github.com/AdoHe/kube2haproxy.git`
+* Step 1: Git clone the kube2haproxy repo: `git clone https://github.com/adohe/kube2haproxy.git`
 * Step 2: Build with godep: `cd kube2haproxy; godep go build -o kube-haproxy main.go`
 
 ## Key command line options
@@ -43,5 +43,5 @@ Compared with kube-proxy(also noted as distributed proxy), kube2haproxy runs loc
 
 ## Licensing
 
-kube2haproxy is licensed under the Apache License, Version 2.0. See [LICENSE](https://github.com/AdoHe/kube2haproxy/blob/master/LICENSE) for the full
+kube2haproxy is licensed under the Apache License, Version 2.0. See [LICENSE](https://github.com/adohe/kube2haproxy/blob/master/LICENSE) for the full
 license text.
